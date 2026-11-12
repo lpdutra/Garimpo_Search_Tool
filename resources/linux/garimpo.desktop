@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Garimpo
+GenericName=File Search
+Comment=Search and replace text in files
+Exec=garimpo-gui %F
+Icon=garimpo
+Terminal=false
+Categories=Development;Utility;TextTools;
+MimeType=application/x-garimpo;
+Keywords=search;grep;find;replace;regex;
