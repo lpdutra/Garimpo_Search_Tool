@@ -62,6 +62,9 @@ SearchForm::SearchForm(History *history, QWidget *parent) : QWidget(parent), m_h
     const PatternMode modeList[] = {PatternMode::Literal, PatternMode::Regex, PatternMode::Expression};
     for (PatternMode mode : modeList) {
         auto *button = new QToolButton;
+        button->setObjectName(QStringLiteral("modeButton"));
+        if (mode == PatternMode::Literal) button->setProperty("position", QStringLiteral("first"));
+        if (mode == PatternMode::Expression) button->setProperty("position", QStringLiteral("last"));
         button->setText(patternModeTitle(mode));
         button->setCheckable(true);
         button->setAutoRaise(false);
@@ -117,6 +120,7 @@ SearchForm::SearchForm(History *history, QWidget *parent) : QWidget(parent), m_h
     connect(m_namesOnly, &QCheckBox::toggled, this, &SearchForm::updateModeControls);
 
     m_filtersButton = new QToolButton;
+    m_filtersButton->setObjectName(QStringLiteral("filtersButton"));
     m_filtersButton->setText(QStringLiteral("Filters"));
     m_filtersButton->setCheckable(true);
     m_filtersButton->setAutoRaise(true);

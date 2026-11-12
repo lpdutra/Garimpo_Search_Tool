@@ -1,5 +1,7 @@
 #include "PreviewView.h"
 
+#include "Theme.h"
+
 #include <QFontDatabase>
 #include <QPainter>
 #include <QScrollBar>
@@ -127,7 +129,9 @@ void PreviewView::showText(const QString &path, const QString &text, const FileR
     setPlainText(text);
 
     QTextCharFormat format;
-    format.setBackground(isDark(palette()) ? QColor(214, 170, 40, 110) : QColor(255, 214, 64, 150));
+    QColor background = Theme::matchBackground(palette());
+    background.setAlphaF(0.55f);
+    format.setBackground(background);
     m_allMatches.clear();
     for (const LineMatch &match : m_matches) {
         for (const Span &span : match.spans) {
@@ -150,14 +154,14 @@ void PreviewView::selectMatch(const LineMatch *match)
     if (!block.isValid()) return;
 
     QTextEdit::ExtraSelection line;
-    line.format.setBackground(palette().color(QPalette::Highlight).lighter(isDark(palette()) ? 60 : 170));
+    line.format.setBackground(Theme::accentSoft(palette(), isDark(palette()) ? 0.30 : 0.22));
     line.format.setProperty(QTextFormat::FullWidthSelection, true);
     line.cursor = QTextCursor(block);
     selections.prepend(line);
 
     QTextCursor first;
     QTextCharFormat current;
-    current.setBackground(QColor(255, 140, 0, 220));
+    current.setBackground(Theme::currentMatchBackground());
     current.setForeground(Qt::black);
     for (const Span &span : match->spans) {
         const QTextCursor cursor = rangeCursor(match->lineNumber, *match, span);

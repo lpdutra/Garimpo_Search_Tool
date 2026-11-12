@@ -56,6 +56,7 @@ if(GARIMPO_BUILD_APP)
         src/app/SearchForm.cpp
         src/app/SearchTab.cpp
         src/app/SettingsDialog.cpp
+        src/app/Theme.cpp
     )
 
     if(APPLE)

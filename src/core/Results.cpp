@@ -35,6 +35,12 @@ Spans spansFromJson(const QJsonValue &value)
     Spans spans;
     const QJsonArray array = value.toArray();
     for (const QJsonValue &item : array) {
+        if (item.isObject()) {
+            // Older files store spans as {"location", "length"} objects.
+            const QJsonObject object = item.toObject();
+            spans.append(Span{object.value(QStringLiteral("location")).toInt(), object.value(QStringLiteral("length")).toInt()});
+            continue;
+        }
         const QJsonArray pair = item.toArray();
         if (pair.size() == 2) spans.append(Span{pair.at(0).toInt(), pair.at(1).toInt()});
     }
@@ -69,7 +75,11 @@ FileResult FileResult::fromJson(const QJsonObject &object)
     FileResult file;
     file.path = object.value(QStringLiteral("path")).toString();
     file.size = object.value(QStringLiteral("size")).toInteger();
-    file.modifiedMSecs = object.value(QStringLiteral("modified")).toInteger();
+    const QJsonValue modified = object.value(QStringLiteral("modified"));
+    // Older files store the date as an ISO string.
+    file.modifiedMSecs = modified.isString()
+        ? QDateTime::fromString(modified.toString(), Qt::ISODate).toMSecsSinceEpoch()
+        : modified.toInteger();
     file.kind = object.value(QStringLiteral("kind")).toString() == QLatin1String("document") ? FileKind::Document : FileKind::Text;
     file.encoding = object.value(QStringLiteral("encoding")).toString();
     file.nameSpans = spansFromJson(object.value(QStringLiteral("nameSpans")));
@@ -78,8 +88,10 @@ FileResult FileResult::fromJson(const QJsonObject &object)
     file.matches.reserve(matchArray.size());
     for (const QJsonValue &value : matchArray) {
         const QJsonObject match = value.toObject();
+        const QJsonValue line = match.contains(QStringLiteral("line")) ? match.value(QStringLiteral("line"))
+                                                                      : match.value(QStringLiteral("lineNumber"));
         file.matches.push_back(LineMatch{
-            match.value(QStringLiteral("line")).toInt(),
+            line.toInt(),
             match.value(QStringLiteral("text")).toString(),
             spansFromJson(match.value(QStringLiteral("spans"))),
         });

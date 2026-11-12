@@ -55,7 +55,7 @@ void setLimits(const garimpo::SearchLimits &limits)
 
 QByteArray windowGeometry() { return value("windowGeometry", QByteArray()).toByteArray(); }
 void setWindowGeometry(const QByteArray &geometry) { store("windowGeometry", geometry); }
-QByteArray splitterState() { return value("splitterState", QByteArray()).toByteArray(); }
-void setSplitterState(const QByteArray &state) { store("splitterState", state); }
+QByteArray splitterState() { return value("resultsSplitter", QByteArray()).toByteArray(); }
+void setSplitterState(const QByteArray &state) { store("resultsSplitter", state); }
 
 } // namespace AppSettings

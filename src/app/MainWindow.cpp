@@ -10,6 +10,7 @@
 #include "SearchTab.h"
 #include "SettingsDialog.h"
 #include "TextCodec.h"
+#include "Theme.h"
 
 #include <QAction>
 #include <QApplication>
@@ -115,12 +116,13 @@ MainWindow::~MainWindow()
 QWidget *MainWindow::buildWelcome()
 {
     auto *label = new QLabel(QStringLiteral(
-        "<div style='text-align:center'><h1>Garimpo</h1>"
+        "<div style='text-align:center'><h1 style='color:%1'>Garimpo</h1>"
         "<p>Pick or drop a folder, type what to find and press Return.</p>"
         "<p>Leave Find empty to list every file matching the masks.</p>"
         "<p>Expression mode: <code>invoice AND (paid OR \"due date\") NOT draft</code>, <code>/regex/</code> terms allowed.</p>"
         "<p>F3 / Shift+F3 move between matches, Ctrl+Down / Ctrl+Up between files, Return opens the editor.</p>"
-        "<p>Folders, patterns and masks you use are remembered in each field's list.</p></div>"));
+        "<p>Folders, patterns and masks you use are remembered in each field's list.</p></div>")
+                                 .arg(Theme::accent(palette()).name()));
     label->setAlignment(Qt::AlignCenter);
     label->setForegroundRole(QPalette::PlaceholderText);
     label->setTextFormat(Qt::RichText);
@@ -186,7 +188,10 @@ QWidget *MainWindow::buildResultsArea()
         if (first == 0 && !m_list->currentIndex().isValid()) selectRow(m_model->stepMatch(-1, 1));
     });
 
-    auto *filterRow = new QHBoxLayout;
+    auto *filterRowWidget = new QWidget;
+    filterRowWidget->setObjectName(QStringLiteral("resultsHeader"));
+    filterRowWidget->setAttribute(Qt::WA_StyledBackground);
+    auto *filterRow = new QHBoxLayout(filterRowWidget);
     filterRow->setContentsMargins(8, 6, 8, 6);
     filterRow->addWidget(m_filter, 1);
     filterRow->addWidget(m_sort);
@@ -194,34 +199,45 @@ QWidget *MainWindow::buildResultsArea()
     auto *leftLayout = new QVBoxLayout(left);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(0);
-    leftLayout->addLayout(filterRow);
+    leftLayout->addWidget(filterRowWidget);
     leftLayout->addWidget(separator());
     leftLayout->addWidget(m_list, 1);
 
     m_previewTitle = new QLabel(QStringLiteral("Preview"));
+    m_previewTitle->setObjectName(QStringLiteral("previewTitle"));
     m_previewTitle->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_previewTitle->setMinimumWidth(80);
+    m_previewTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_previewInfo = new QLabel;
-    m_previewInfo->setForegroundRole(QPalette::PlaceholderText);
+    m_previewInfo->setObjectName(QStringLiteral("previewPosition"));
     m_preview = new PreviewView;
     m_preview->setFrameShape(QFrame::NoFrame);
-    auto *previewHeader = new QHBoxLayout;
-    previewHeader->setContentsMargins(8, 6, 8, 6);
+    auto *previewHeaderWidget = new QWidget;
+    previewHeaderWidget->setObjectName(QStringLiteral("previewHeader"));
+    previewHeaderWidget->setAttribute(Qt::WA_StyledBackground);
+    auto *previewHeader = new QHBoxLayout(previewHeaderWidget);
+    previewHeader->setContentsMargins(10, 6, 10, 6);
     previewHeader->addWidget(m_previewTitle, 1);
     previewHeader->addWidget(m_previewInfo);
     auto *right = new QWidget;
     auto *rightLayout = new QVBoxLayout(right);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(0);
-    rightLayout->addLayout(previewHeader);
+    rightLayout->addWidget(previewHeaderWidget);
     rightLayout->addWidget(separator());
     rightLayout->addWidget(m_preview, 1);
 
     m_splitter = new QSplitter;
+    m_splitter->setHandleWidth(7);
     m_splitter->addWidget(left);
     m_splitter->addWidget(right);
-    m_splitter->setStretchFactor(0, 1);
-    m_splitter->setStretchFactor(1, 1);
+    // The occurrences are the focus, so the list gets the larger share.
+    m_splitter->setStretchFactor(0, 3);
+    m_splitter->setStretchFactor(1, 2);
+    m_splitter->setSizes({760, 500});
     m_splitter->setChildrenCollapsible(false);
+    left->setMinimumWidth(280);
+    right->setMinimumWidth(240);
 
     auto *area = new QWidget;
     auto *layout = new QVBoxLayout(area);
@@ -513,10 +529,13 @@ void MainWindow::updatePreview()
         return;
     }
     const LineMatch *match = m_model->matchAt(row);
-    QString title = file->path;
-    if (title.startsWith(QDir::homePath())) title = QLatin1Char('~') + title.mid(QDir::homePath().size());
-    m_previewTitle->setText(title);
-    QString info = match ? QStringLiteral("Line %1, column %2").arg(match->lineNumber).arg(match->column()) : QString();
+    QString folder = file->directory();
+    if (folder.startsWith(QDir::homePath())) folder = QLatin1Char('~') + folder.mid(QDir::homePath().size());
+    m_previewTitle->setToolTip(file->path);
+    m_previewTitle->setText(QStringLiteral("%1  <span style='font-weight:normal; color:%2'>%3</span>")
+                                .arg(file->name().toHtmlEscaped(), Theme::dimText(palette()).name(QColor::HexArgb),
+                                     folder.toHtmlEscaped()));
+    QString info = match ? QStringLiteral("Line %1, col %2").arg(match->lineNumber).arg(match->column()) : QString();
     if (!file->encoding.isEmpty()) info += (info.isEmpty() ? QString() : QStringLiteral("  ·  ")) + file->encoding;
     m_previewInfo->setText(info);
 
@@ -741,7 +760,8 @@ void MainWindow::restoreSession()
         const QJsonObject object = value.toObject();
         addTab(new SearchTab(ResultDocument::fromJson(object), object.value(QStringLiteral("filePath")).toString(), this));
     }
-    const int selected = session->value(QStringLiteral("selected")).toInt(-1);
+    const int selected = session->contains(QStringLiteral("selected")) ? session->value(QStringLiteral("selected")).toInt(-1)
+                                                                       : session->value(QStringLiteral("selectedIndex")).toInt(-1);
     if (selected >= 0 && selected < m_tabBar->count()) m_tabBar->setCurrentIndex(selected);
 }
 

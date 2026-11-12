@@ -1,9 +1,11 @@
 #include "HighlightDelegate.h"
 
 #include "ResultsModel.h"
+#include "Theme.h"
 
 #include <QApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QPainter>
 #include <QPainterPath>
@@ -17,8 +19,7 @@ constexpr int kPadding = 8;
 
 QColor highlightColor(const QPalette &palette)
 {
-    const bool dark = palette.color(QPalette::Base).lightness() < 128;
-    return dark ? QColor(214, 170, 40, 170) : QColor(255, 214, 64, 200);
+    return Theme::matchBackground(palette);
 }
 
 /// Draws `text` from `x`, painting the spans behind it, and returns where it stopped.
@@ -35,7 +36,10 @@ void drawSpans(QPainter *painter, const QFontMetrics &metrics, const QRect &rect
         const int width = metrics.horizontalAdvance(piece);
         if (marked) {
             const QRect box(x - 1, rect.top() + 2, qMin(width + 2, right - x + 1), rect.height() - 4);
-            painter->fillRect(box, mark);
+            QPainterPath path;
+            path.addRoundedRect(QRectF(box), 3, 3);
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->fillPath(path, mark);
         }
         painter->setPen(marked ? markText : textColor);
         if (x + width > right) {
@@ -61,9 +65,19 @@ HighlightDelegate::HighlightDelegate(ResultsModel *model, QObject *parent)
     : QStyledItemDelegate(parent)
     , m_model(model)
     , m_mono(QFontDatabase::systemFont(QFontDatabase::FixedFont))
-    , m_fileIcon(QApplication::style()->standardIcon(QStyle::SP_FileIcon))
-    , m_documentIcon(QIcon::fromTheme(QStringLiteral("x-office-document"), m_fileIcon))
 {
+}
+
+QIcon HighlightDelegate::iconFor(const QString &path) const
+{
+    const qsizetype dot = path.lastIndexOf(QLatin1Char('.'));
+    const QString suffix = dot > path.lastIndexOf(QLatin1Char('/')) ? path.mid(dot + 1).toLower() : QString();
+    auto it = m_icons.constFind(suffix);
+    if (it != m_icons.constEnd()) return *it;
+    QIcon icon = m_iconProvider.icon(QFileInfo(path));
+    if (icon.isNull()) icon = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
+    m_icons.insert(suffix, icon);
+    return icon;
 }
 
 QSize HighlightDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &) const
@@ -107,9 +121,9 @@ void HighlightDelegate::paintHeader(QPainter *painter, const QStyleOptionViewIte
     dimColor.setAlphaF(0.55f);
 
     const QRect rect = option.rect;
+    if (!selected) painter->fillRect(rect, Theme::accentSoft(palette, 0.10));
     const int iconSize = 16;
-    (file->kind == FileKind::Document ? m_documentIcon : m_fileIcon)
-        .paint(painter, QRect(rect.left() + kPadding, rect.top() + (rect.height() - iconSize) / 2, iconSize, iconSize));
+    iconFor(file->path).paint(painter, QRect(rect.left() + kPadding, rect.top() + (rect.height() - iconSize) / 2, iconSize, iconSize));
 
     // Match count badge on the right.
     int right = rect.right() - kPadding;
@@ -121,12 +135,11 @@ void HighlightDelegate::paintHeader(QPainter *painter, const QStyleOptionViewIte
         const int width = metrics.horizontalAdvance(badge) + 12;
         const QRect box(right - width, rect.top() + 4, width, rect.height() - 8);
         QPainterPath path;
-        path.addRoundedRect(box, box.height() / 2.0, box.height() / 2.0);
-        QColor fill = palette.color(QPalette::Highlight);
-        fill.setAlphaF(selected ? 0.0f : 0.25f);
-        painter->fillPath(path, selected ? QColor(255, 255, 255, 60) : fill);
+        path.addRoundedRect(QRectF(box), box.height() / 2.0, box.height() / 2.0);
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->fillPath(path, selected ? QColor(255, 255, 255, 70) : Theme::accent(palette));
         painter->setFont(small);
-        painter->setPen(textColor);
+        painter->setPen(Qt::white);
         painter->drawText(box, Qt::AlignCenter, badge);
         right = box.left() - 8;
     }
@@ -172,7 +185,9 @@ void HighlightDelegate::paintMatch(QPainter *painter, const QStyleOptionViewItem
     const QFontMetrics metrics(mono);
     painter->setFont(mono);
 
-    painter->setPen(dimColor);
+    QColor numberColor = selected ? dimColor : Theme::accent(palette);
+    if (!selected) numberColor.setAlphaF(0.85f);
+    painter->setPen(numberColor);
     painter->drawText(QRect(rect.left(), rect.top(), kLineNumberWidth, rect.height()), Qt::AlignVCenter | Qt::AlignRight,
                       QString::number(match->lineNumber));
 

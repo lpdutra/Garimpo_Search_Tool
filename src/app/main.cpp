@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "Theme.h"
 
 #include <QApplication>
 #include <QFileOpenEvent>
@@ -37,6 +38,7 @@ int main(int argc, char *argv[])
     QApplication::setDesktopFileName(QStringLiteral("garimpo"));
 
     Application app(argc, argv);
+    Theme::apply(app);
     MainWindow window;
     app.window = &window;
     window.show();
