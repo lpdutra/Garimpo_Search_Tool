@@ -5,15 +5,18 @@
 #   scripts/build.sh --install      macOS: copy Garimpo.app to /Applications
 #                                   Linux: install into ~/.local (bin, desktop entry, icon)
 #   scripts/build.sh --standalone   macOS: bundle the Qt libraries inside the app (macdeployqt)
+#   scripts/build.sh --package      macOS: standalone build zipped for a release in build/
 set -eu
 
 cd "$(dirname "$0")/.."
 INSTALL=0
 STANDALONE=0
+PACKAGE=0
 for arg in "$@"; do
     case "$arg" in
         --install) INSTALL=1 ;;
         --standalone) STANDALONE=1 ;;
+        --package) STANDALONE=1; PACKAGE=1 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -34,10 +37,22 @@ ctest --test-dir build --output-on-failure
 if [ "$(uname)" = "Darwin" ]; then
     APP=build/Garimpo.app
     if [ "$STANDALONE" = 1 ]; then
-        "$PREFIX_PATH/bin/macdeployqt" "$APP" -always-overwrite
+        # Drop libraries left over from an earlier run so only current ones ship.
+        rm -rf "$APP/Contents/Frameworks" "$APP/Contents/PlugIns" "$APP/Contents/Resources/qt.conf"
+        cmake --build build --target garimpo-app
+        "$PREFIX_PATH/bin/macdeployqt" "$APP" -always-overwrite \
+            -executable="$APP/Contents/Helpers/garimpo"
     fi
     codesign --force --deep --sign - "$APP"
     echo "Built $APP"
+    if [ "$PACKAGE" = 1 ]; then
+        VERSION="$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")"
+        ZIP="build/Garimpo-$VERSION-macos-$(uname -m).zip"
+        rm -f "$ZIP"
+        ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+        echo "Packaged $ZIP"
+        shasum -a 256 "$ZIP"
+    fi
     if [ "$INSTALL" = 1 ]; then
         rm -rf /Applications/Garimpo.app
         cp -R "$APP" /Applications/

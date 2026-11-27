@@ -36,6 +36,28 @@ and the app stays under 100 MB of memory with all those results open.
 - **Export** to text (`path:line:column: text`), CSV or HTML, and print.
 - **Command-line tool** `garimpo` sharing the same engine.
 
+## Install
+
+With [Homebrew](https://brew.sh) on macOS or Linux:
+
+```sh
+brew tap lpdutra/tap
+
+# macOS 26+ on Apple Silicon: ready-made app (Garimpo.app plus the garimpo command)
+brew install --cask garimpo
+
+# Any other Mac, or Linux: build from source against Homebrew's Qt
+brew install garimpo
+
+brew install poppler            # optional, for PDF search
+```
+
+The ready-made app is also attached to each
+[release](https://github.com/lpdutra/Garimpo_Search_Tool/releases) as a zip. It is not notarized,
+so after unzipping it by hand, run `xattr -dr com.apple.quarantine Garimpo.app` (or choose
+**Open Anyway** in System Settings › Privacy & Security) before the first launch. The cask does
+this for you.
+
 ## Build
 
 Requirements: CMake 3.21+, a C++20 compiler, Qt 6.4+ (Core, Gui, Widgets, PrintSupport, Test) and zlib.
@@ -50,7 +72,8 @@ scripts/build.sh --install      # also copy it to /Applications
 ```
 
 The app links to the Homebrew Qt libraries. `scripts/build.sh --standalone` copies Qt into the
-bundle so it runs on a Mac without Homebrew.
+bundle so it runs on a Mac without Homebrew, and `scripts/build.sh --package` zips that bundle
+for a release.
 
 Debian / Ubuntu:
 
