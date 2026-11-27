@@ -2,6 +2,7 @@
 
 #include "Export.h"
 #include "Storage.h"
+#include "Syntax.h"
 
 #include <QMainWindow>
 
@@ -16,6 +17,7 @@ class QListView;
 class QSplitter;
 class QStackedWidget;
 class QTabBar;
+class QToolButton;
 class ResultsModel;
 class SearchForm;
 class SearchTab;
@@ -63,6 +65,8 @@ private:
     void stepMatch(int step);
     void stepFile(int step);
     void updateStatus();
+    void highlightPreviewNow();
+    void showSlowSyntaxNotice(qint64 fileSize, qint64 milliseconds);
 
     // Files
     void openResults();
@@ -94,6 +98,10 @@ private:
     QLabel *m_previewTitle;
     QLabel *m_previewInfo;
     PreviewView *m_preview;
+    QToolButton *m_highlightButton;
+    QWidget *m_syntaxNotice;
+    QLabel *m_syntaxNoticeText;
+    const garimpo::SyntaxLanguage *m_previewLanguage = nullptr;
     QLabel *m_status;
     quint64 m_previewGeneration = 0;
 };

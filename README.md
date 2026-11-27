@@ -23,6 +23,10 @@ and the app stays under 100 MB of memory with all those results open.
   with line numbers that scrolls to the selected match. F3 / Shift+F3 (⌘G / ⇧⌘G on macOS) move
   between matches, Ctrl+Down / Ctrl+Up between files. Return or a double-click opens the editor at
   the matching line.
+- **Syntax highlighting** in the preview for 25 languages, among them ABL/Progress 4GL (`.p .i .w .cls
+  .df`), SQL, C#, Java, JavaScript/TypeScript, Python, shell scripts, XML/HTML, JSON and YAML. Only the
+  lines on screen are colored, so big files stay quick; files over a size limit (2 MB by default,
+  set in Settings) get a **Highlight Syntax** button instead.
 - **Tabs**: every search opens in a tab that can be renamed, reordered, searched again, or saved
   as a `.garimpo` file and reopened. Open tabs come back on the next launch.
 - **Replace** with a preview of every changed line, per-file and per-line selection, regex groups

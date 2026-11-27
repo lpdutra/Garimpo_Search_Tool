@@ -5,6 +5,7 @@
 #include "Replace.h"
 #include "SearchEngine.h"
 #include "Storage.h"
+#include "Syntax.h"
 #include "TextCodec.h"
 #include "TextLines.h"
 
@@ -102,6 +103,22 @@ QByteArray makeZip(const QByteArray &name, const QByteArray &content)
     u32(zip, 0x06054b50); u16(zip, 0); u16(zip, 0); u16(zip, 1); u16(zip, 1);
     u32(zip, centralSize); u32(zip, central); u16(zip, 0);
     return zip;
+}
+
+/// Colored pieces of one line as "Token(text)" words, for compact comparisons.
+QString colors(const QString &language, const QString &line, int state = 0, int *next = nullptr)
+{
+    static const char *names[] = {"Keyword", "Type", "Constant", "Number", "String", "Comment", "Preprocessor",
+                                  "Tag", "Attribute", "Variable", "Heading", "Emphasis", "Code"};
+    const SyntaxLanguage *syntax = Syntax::named(language);
+    if (!syntax) return QStringLiteral("no language %1").arg(language);
+    std::vector<SyntaxSpan> spans;
+    const int after = Syntax::highlightLine(*syntax, line, state, &spans);
+    if (next) *next = after;
+    QStringList parts;
+    for (const SyntaxSpan &span : spans)
+        parts.append(QStringLiteral("%1(%2)").arg(QLatin1String(names[int(span.token)]), line.mid(span.start, span.length)));
+    return parts.join(QLatin1Char(' '));
 }
 
 } // namespace
@@ -569,6 +586,113 @@ private Q_SLOTS:
         QCOMPARE(loaded->title, QStringLiteral("Saved"));
         QVERIFY(loaded->query == document.query);
         QCOMPARE(loaded->files.front().matches.front().spans.first(), (Span{0, 3}));
+    }
+
+    // Syntax
+
+    void syntaxLanguageFromExtension()
+    {
+        QCOMPARE(Syntax::name(*Syntax::forPath(QStringLiteral("/src/order.p"))), QStringLiteral("ABL"));
+        QCOMPARE(Syntax::name(*Syntax::forPath(QStringLiteral("/src/Customer.CLS"))), QStringLiteral("ABL"));
+        QCOMPARE(Syntax::name(*Syntax::forPath(QStringLiteral("query.sql"))), QStringLiteral("SQL"));
+        QCOMPARE(Syntax::name(*Syntax::forPath(QStringLiteral("app.tsx"))), QStringLiteral("TypeScript"));
+        QCOMPARE(Syntax::name(*Syntax::forPath(QStringLiteral("/home/me/.bashrc"))), QStringLiteral("Shell"));
+        QVERIFY(!Syntax::forPath(QStringLiteral("notes.txt")));
+        QVERIFY(!Syntax::forPath(QStringLiteral("/dir.p/Makefile")));
+        QCOMPARE(Syntax::names().size(), qsizetype(25));
+    }
+
+    void syntaxAblStatements()
+    {
+        QCOMPARE(colors(QStringLiteral("ABL"), QStringLiteral("for each Customer no-lock where Customer.cust-num = 10:")),
+                 QStringLiteral("Keyword(for) Keyword(each) Keyword(no-lock) Keyword(where) Number(10)"));
+        QCOMPARE(colors(QStringLiteral("ABL"), QStringLiteral("DEFINE VARIABLE cName AS CHARACTER NO-UNDO INITIAL ?.")),
+                 QStringLiteral("Keyword(DEFINE) Keyword(VARIABLE) Keyword(AS) Type(CHARACTER) Keyword(NO-UNDO) "
+                                "Keyword(INITIAL) Constant(?)"));
+        QCOMPARE(colors(QStringLiteral("ABL"), QStringLiteral("MESSAGE \"say ~\"hi~\"\" VIEW-AS ALERT-BOX.")),
+                 QStringLiteral("Keyword(MESSAGE) String(\"say ~\"hi~\"\") Keyword(VIEW-AS) Keyword(ALERT-BOX)"));
+        QCOMPARE(colors(QStringLiteral("ABL"), QStringLiteral("&SCOPED-DEFINE max 5 {include/defs.i &table=\"order\"}")),
+                 QStringLiteral("Preprocessor(&SCOPED-DEFINE) Number(5) Preprocessor({include/defs.i &table=\"order\"})"));
+    }
+
+    void syntaxAblNestedCommentsSpanLines()
+    {
+        int state = 0;
+        QCOMPARE(colors(QStringLiteral("ABL"), QStringLiteral("x = 1. /* outer /* inner */"), 0, &state),
+                 QStringLiteral("Number(1) Comment(/* outer /* inner */)"));
+        QVERIFY(state != 0);
+        QCOMPARE(colors(QStringLiteral("ABL"), QStringLiteral("still */ DISPLAY x."), state, &state),
+                 QStringLiteral("Comment(still */) Keyword(DISPLAY)"));
+        QCOMPARE(state, 0);
+    }
+
+    void syntaxSqlAndCode()
+    {
+        QCOMPARE(colors(QStringLiteral("SQL"), QStringLiteral("select nvl(a, 'x''y') from dual -- note")),
+                 QStringLiteral("Keyword(select) Keyword(nvl) String('x''y') Keyword(from) Comment(-- note)"));
+        QCOMPARE(colors(QStringLiteral("C/C++"), QStringLiteral("  #include <vector>")), QStringLiteral("Preprocessor(#include <vector>)"));
+        QCOMPARE(colors(QStringLiteral("C#"), QStringLiteral("var s = \"a\\\"b\"; // done")),
+                 QStringLiteral("Keyword(var) String(\"a\\\"b\") Comment(// done)"));
+        QCOMPARE(colors(QStringLiteral("Shell"), QStringLiteral("echo \"$HOME\" $# ${x} # end")),
+                 QStringLiteral("Keyword(echo) String(\"$HOME\") Variable($#) Variable(${x}) Comment(# end)"));
+        QCOMPARE(colors(QStringLiteral("PowerShell"), QStringLiteral("if ($a -eq 1) { Get-Item }")),
+                 QStringLiteral("Keyword(if) Variable($a) Keyword(-eq) Number(1)"));
+        QCOMPARE(colors(QStringLiteral("Batch"), QStringLiteral("set x=%PATH% & echo %%i %1")),
+                 QStringLiteral("Keyword(set) Variable(%PATH%) Keyword(echo) Variable(%%i) Variable(%1)"));
+        QCOMPARE(colors(QStringLiteral("Batch"), QStringLiteral("REM a comment")), QStringLiteral("Comment(REM a comment)"));
+        QCOMPARE(colors(QStringLiteral("Batch"), QStringLiteral("remove.exe")), QString());
+    }
+
+    void syntaxStringsAndCommentsSpanLines()
+    {
+        int state = 0;
+        colors(QStringLiteral("Python"), QStringLiteral("doc = \"\"\"first"), 0, &state);
+        QVERIFY(state != 0);
+        QCOMPARE(colors(QStringLiteral("Python"), QStringLiteral("last\"\"\" if True"), state, &state),
+                 QStringLiteral("String(last\"\"\") Keyword(if) Constant(True)"));
+        QCOMPARE(state, 0);
+
+        colors(QStringLiteral("JavaScript"), QStringLiteral("const t = `a"), 0, &state);
+        QCOMPARE(colors(QStringLiteral("JavaScript"), QStringLiteral("b` + 1"), state, &state), QStringLiteral("String(b`) Number(1)"));
+
+        // A quote that cannot span lines stops at the end of the line.
+        colors(QStringLiteral("C/C++"), QStringLiteral("char *s = \"open"), 0, &state);
+        QCOMPARE(state, 0);
+    }
+
+    void syntaxDataFormats()
+    {
+        QCOMPARE(colors(QStringLiteral("JSON"), QStringLiteral("{ \"name\": \"x\", \"on\": true }")),
+                 QStringLiteral("Attribute(\"name\") String(\"x\") Attribute(\"on\") Constant(true)"));
+        QCOMPARE(colors(QStringLiteral("YAML"), QStringLiteral("  - image: nginx:1.25 # web")),
+                 QStringLiteral("Attribute(image) Number(1.25) Comment(# web)"));
+        QCOMPARE(colors(QStringLiteral("INI"), QStringLiteral("[server]")), QStringLiteral("Type([server])"));
+        QCOMPARE(colors(QStringLiteral("INI"), QStringLiteral("port = 8080")), QStringLiteral("Attribute(port) Number(8080)"));
+        QCOMPARE(colors(QStringLiteral("Markdown"), QStringLiteral("## Title")), QStringLiteral("Heading(## Title)"));
+        QCOMPARE(colors(QStringLiteral("Markdown"), QStringLiteral("- use `code` and **bold**")),
+                 QStringLiteral("Keyword(-) Code(`code`) Emphasis(**bold**)"));
+    }
+
+    void syntaxMarkupTagsSpanLines()
+    {
+        int state = 0;
+        QCOMPARE(colors(QStringLiteral("XML"), QStringLiteral("<a href=\"x\">text &amp; more</a> <!-- c"), 0, &state),
+                 QStringLiteral("Tag(<a) Attribute(href) String(\"x\") Tag(>) Constant(&amp;) Tag(</a) Tag(>) Comment(<!-- c)"));
+        QCOMPARE(colors(QStringLiteral("XML"), QStringLiteral("end --> <b"), state, &state),
+                 QStringLiteral("Comment(end -->) Tag(<b)"));
+        QCOMPARE(colors(QStringLiteral("XML"), QStringLiteral("   name='n'/>"), state, &state),
+                 QStringLiteral("Attribute(name) String('n') Tag(/>)"));
+        QCOMPARE(state, 0);
+    }
+
+    void syntaxLineStatesFollowParagraphs()
+    {
+        const SyntaxLanguage *c = Syntax::named(QStringLiteral("C/C++"));
+        const std::vector<int> states = Syntax::lineStates(*c, QStringLiteral("a /* x\r\nb\rc */\nd\n"));
+        QCOMPARE(states.size(), size_t(5));
+        QCOMPARE(states[0], 0);
+        QVERIFY(states[1] != 0 && states[2] != 0);
+        QCOMPARE(states[3], 0);
     }
 };
 

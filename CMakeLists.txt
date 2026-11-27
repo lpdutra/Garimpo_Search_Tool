@@ -30,6 +30,8 @@ add_library(garimpo_core STATIC
     src/core/Results.cpp
     src/core/SearchEngine.cpp
     src/core/Storage.cpp
+    src/core/Syntax.cpp
+    src/core/SyntaxLanguages.cpp
     src/core/TextCodec.cpp
     src/core/TextLines.cpp
 )

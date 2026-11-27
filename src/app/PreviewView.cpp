@@ -6,6 +6,7 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <QTextBlock>
+#include <QTextLayout>
 
 using namespace garimpo;
 
@@ -39,6 +40,7 @@ PreviewView::PreviewView(QWidget *parent) : QPlainTextEdit(parent), m_lineNumber
     connect(this, &QPlainTextEdit::blockCountChanged, this, [this] { setViewportMargins(lineNumberAreaWidth(), 0, 0, 0); });
     connect(this, &QPlainTextEdit::updateRequest, this, &PreviewView::updateLineNumberArea);
     setViewportMargins(lineNumberAreaWidth(), 0, 0, 0);
+    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, &PreviewView::highlightVisibleLines);
 }
 
 void PreviewView::setFontSize(int size)
@@ -47,6 +49,7 @@ void PreviewView::setFontSize(int size)
     font.setPointSize(size);
     setFont(font);
     setViewportMargins(lineNumberAreaWidth(), 0, 0, 0);
+    highlightVisibleLines();
 }
 
 int PreviewView::lineNumberAreaWidth() const
@@ -60,6 +63,7 @@ void PreviewView::resizeEvent(QResizeEvent *event)
     QPlainTextEdit::resizeEvent(event);
     const QRect area = contentsRect();
     m_lineNumbers->setGeometry(QRect(area.left(), area.top(), lineNumberAreaWidth(), area.height()));
+    highlightVisibleLines();
 }
 
 void PreviewView::updateLineNumberArea(const QRect &rect, int dy)
@@ -94,8 +98,59 @@ void PreviewView::paintLineNumbers(QPaintEvent *event)
     }
 }
 
+void PreviewView::clearSyntax()
+{
+    m_language = nullptr;
+    m_lineStates.clear();
+    m_colored.clear();
+}
+
+void PreviewView::setSyntax(const SyntaxLanguage *language, std::vector<int> lineStates)
+{
+    clearSyntax();
+    if (!language) return;
+    m_language = language;
+    // Lines that do not line up with the document start plain; the visible ones still get colors.
+    if (lineStates.size() == size_t(blockCount())) m_lineStates = std::move(lineStates);
+    m_colored.assign(size_t(blockCount()), false);
+    for (int i = 0; i < kSyntaxTokenCount; ++i) {
+        const auto token = SyntaxToken(i);
+        QTextCharFormat format;
+        format.setForeground(Theme::syntaxColor(palette(), token));
+        if (token == SyntaxToken::Comment) format.setFontItalic(true);
+        if (token == SyntaxToken::Heading || token == SyntaxToken::Emphasis) format.setFontWeight(QFont::Bold);
+        m_syntaxFormats[i] = format;
+    }
+    highlightVisibleLines();
+}
+
+void PreviewView::highlightVisibleLines()
+{
+    if (!m_language) return;
+    // Color a screen ahead as well, so scrolling does not show plain text first.
+    const int limit = viewport()->height() * 2;
+    const QPointF offset = contentOffset();
+    std::vector<SyntaxSpan> spans;
+    for (QTextBlock block = firstVisibleBlock(); block.isValid(); block = block.next()) {
+        if (blockBoundingGeometry(block).translated(offset).top() > limit) break;
+        const size_t number = size_t(block.blockNumber());
+        if (number >= m_colored.size() || m_colored[number]) continue;
+        m_colored[number] = true;
+        spans.clear();
+        const int state = number < m_lineStates.size() ? m_lineStates[number] : 0;
+        Syntax::highlightLine(*m_language, block.text(), state, &spans);
+        if (spans.empty()) continue;
+        QList<QTextLayout::FormatRange> ranges;
+        ranges.reserve(qsizetype(spans.size()));
+        for (const SyntaxSpan &span : spans) ranges.append({span.start, span.length, m_syntaxFormats[int(span.token)]});
+        block.layout()->setFormats(ranges);
+        document()->markContentsDirty(block.position(), block.length());
+    }
+}
+
 void PreviewView::showMessage(const QString &message)
 {
+    clearSyntax();
     m_path.clear();
     m_allMatches.clear();
     m_matches.clear();
@@ -124,14 +179,15 @@ QTextCursor PreviewView::rangeCursor(int lineNumber, const LineMatch &match, con
 
 void PreviewView::showText(const QString &path, const QString &text, const FileResult &file)
 {
+    clearSyntax();
     m_path = path;
     m_matches = file.matches;
     setPlainText(text);
 
+    // Dark text on the match color stays readable over any syntax color, as in the result list.
     QTextCharFormat format;
-    QColor background = Theme::matchBackground(palette());
-    background.setAlphaF(0.55f);
-    format.setBackground(background);
+    format.setBackground(Theme::matchBackground(palette()));
+    format.setForeground(Qt::black);
     m_allMatches.clear();
     for (const LineMatch &match : m_matches) {
         for (const Span &span : match.spans) {

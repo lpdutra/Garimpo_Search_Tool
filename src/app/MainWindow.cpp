@@ -38,6 +38,8 @@
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTextDocument>
+#include <QToolButton>
+#include <QElapsedTimer>
 #include <QThread>
 #include <QVBoxLayout>
 
@@ -46,6 +48,8 @@ using namespace garimpo;
 namespace {
 
 constexpr qsizetype kMaxPreviewCharacters = 4'000'000;
+/// Automatic highlighting slower than this suggests the size limit was raised too far.
+constexpr qint64 kSlowSyntaxMilliseconds = 700;
 
 QString safeFileName(const QString &title)
 {
@@ -218,12 +222,38 @@ QWidget *MainWindow::buildResultsArea()
     auto *previewHeader = new QHBoxLayout(previewHeaderWidget);
     previewHeader->setContentsMargins(10, 6, 10, 6);
     previewHeader->addWidget(m_previewTitle, 1);
+    m_highlightButton = new QToolButton;
+    m_highlightButton->setObjectName(QStringLiteral("highlightButton"));
+    m_highlightButton->setText(QStringLiteral("Highlight Syntax"));
+    m_highlightButton->setCursor(Qt::PointingHandCursor);
+    m_highlightButton->hide();
+    connect(m_highlightButton, &QToolButton::clicked, this, &MainWindow::highlightPreviewNow);
+    previewHeader->addWidget(m_highlightButton);
     previewHeader->addWidget(m_previewInfo);
+
+    m_syntaxNotice = new QWidget;
+    m_syntaxNotice->setObjectName(QStringLiteral("syntaxNotice"));
+    m_syntaxNotice->setAttribute(Qt::WA_StyledBackground);
+    m_syntaxNoticeText = new QLabel;
+    m_syntaxNoticeText->setWordWrap(true);
+    m_syntaxNoticeText->setTextFormat(Qt::RichText);
+    connect(m_syntaxNoticeText, &QLabel::linkActivated, this, [this] { showSettings(); });
+    auto *dismiss = new QToolButton;
+    dismiss->setText(QStringLiteral("✕"));
+    dismiss->setAutoRaise(true);
+    dismiss->setToolTip(QStringLiteral("Dismiss"));
+    connect(dismiss, &QToolButton::clicked, m_syntaxNotice, &QWidget::hide);
+    auto *noticeLayout = new QHBoxLayout(m_syntaxNotice);
+    noticeLayout->setContentsMargins(10, 6, 6, 6);
+    noticeLayout->addWidget(m_syntaxNoticeText, 1);
+    noticeLayout->addWidget(dismiss, 0, Qt::AlignTop);
+    m_syntaxNotice->hide();
     auto *right = new QWidget;
     auto *rightLayout = new QVBoxLayout(right);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(0);
     rightLayout->addWidget(previewHeaderWidget);
+    rightLayout->addWidget(m_syntaxNotice);
     rightLayout->addWidget(separator());
     rightLayout->addWidget(m_preview, 1);
 
@@ -526,6 +556,8 @@ void MainWindow::updatePreview()
         m_previewTitle->setText(QStringLiteral("Preview"));
         m_previewInfo->clear();
         m_preview->showMessage(QString());
+        m_highlightButton->hide();
+        m_syntaxNotice->hide();
         return;
     }
     const LineMatch *match = m_model->matchAt(row);
@@ -537,6 +569,10 @@ void MainWindow::updatePreview()
                                      folder.toHtmlEscaped()));
     QString info = match ? QStringLiteral("Line %1, col %2").arg(match->lineNumber).arg(match->column()) : QString();
     if (!file->encoding.isEmpty()) info += (info.isEmpty() ? QString() : QStringLiteral("  ·  ")) + file->encoding;
+    const SyntaxLanguage *language = file->kind == FileKind::Text && AppSettings::syntaxHighlighting()
+        ? Syntax::forPath(file->path)
+        : nullptr;
+    if (language) info += (info.isEmpty() ? QString() : QStringLiteral("  ·  ")) + Syntax::name(*language);
     m_previewInfo->setText(info);
 
     if (m_preview->shownPath() == file->path) {
@@ -547,8 +583,12 @@ void MainWindow::updatePreview()
     // Read the file off the UI thread; only the newest request is shown.
     const quint64 generation = ++m_previewGeneration;
     const FileResult copy = *file;
+    m_previewLanguage = language;
+    m_highlightButton->hide();
+    m_syntaxNotice->hide();
+    const bool automatic = language && copy.size <= qint64(AppSettings::syntaxLimitMB()) * 1024 * 1024;
     QPointer<MainWindow> self(this);
-    QThread *thread = QThread::create([self, generation, copy] {
+    QThread *thread = QThread::create([self, generation, copy, language, automatic] {
         QString text;
         bool ok = false;
         if (copy.kind == FileKind::Document) {
@@ -560,18 +600,66 @@ void MainWindow::updatePreview()
             text = decoded->text;
         }
         if (text.size() > kMaxPreviewCharacters) text.truncate(kMaxPreviewCharacters);
-        QMetaObject::invokeMethod(self.data(), [self, generation, copy, text, ok] {
+        // Following comments and strings across lines is the only part that reads the whole file.
+        std::vector<int> states;
+        qint64 elapsed = 0;
+        if (ok && automatic) {
+            QElapsedTimer timer;
+            timer.start();
+            states = Syntax::lineStates(*language, text);
+            elapsed = timer.elapsed();
+        }
+        QMetaObject::invokeMethod(self.data(), [self, generation, copy, text, ok, language, automatic,
+                                                states = std::move(states), elapsed]() mutable {
             if (!self || generation != self->m_previewGeneration) return;
             if (!ok) {
                 self->m_preview->showMessage(QStringLiteral("This file cannot be previewed."));
                 return;
             }
+            QElapsedTimer timer;
+            timer.start();
             self->m_preview->showText(copy.path, text, copy);
+            if (automatic) self->m_preview->setSyntax(language, std::move(states));
             self->m_preview->selectMatch(self->m_model->matchAt(self->m_list->currentIndex().row()));
+            if (language && !automatic) {
+                self->m_highlightButton->setToolTip(
+                    QStringLiteral("This %1 file is over the %2 MB limit for automatic highlighting "
+                                   "(Settings › General).")
+                        .arg(QLocale().formattedDataSize(copy.size))
+                        .arg(AppSettings::syntaxLimitMB()));
+                self->m_highlightButton->show();
+            }
+            if (automatic) self->showSlowSyntaxNotice(copy.size, elapsed + timer.elapsed());
         }, Qt::QueuedConnection);
     });
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     thread->start();
+}
+
+void MainWindow::highlightPreviewNow()
+{
+    if (!m_previewLanguage || m_preview->hasSyntax() || m_preview->shownPath().isEmpty()) return;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    m_preview->setSyntax(m_previewLanguage, Syntax::lineStates(*m_previewLanguage, m_preview->toPlainText()));
+    QApplication::restoreOverrideCursor();
+    m_highlightButton->hide();
+}
+
+void MainWindow::showSlowSyntaxNotice(qint64 fileSize, qint64 milliseconds)
+{
+    // Only worth mentioning when a raised limit is what made it slow.
+    if (milliseconds < kSlowSyntaxMilliseconds || AppSettings::syntaxLimitMB() <= AppSettings::kDefaultSyntaxLimitMB)
+        return;
+    m_syntaxNoticeText->setText(
+        QStringLiteral("Syntax highlighting took %1 s on this %2 file because files up to %3 MB are highlighted "
+                       "automatically. A lower limit (the default is %4 MB) keeps the preview quick, and bigger "
+                       "files can still be highlighted with the Highlight Syntax button. "
+                       "<a href=\"settings\">Change the limit…</a>")
+            .arg(double(milliseconds) / 1000.0, 0, 'f', 1)
+            .arg(QLocale().formattedDataSize(fileSize))
+            .arg(AppSettings::syntaxLimitMB())
+            .arg(AppSettings::kDefaultSyntaxLimitMB));
+    m_syntaxNotice->show();
 }
 
 void MainWindow::openSelection()
@@ -825,6 +913,8 @@ void MainWindow::undoLastReplace()
 
 void MainWindow::showSettings()
 {
+    const bool syntax = AppSettings::syntaxHighlighting();
+    const int syntaxLimit = AppSettings::syntaxLimitMB();
     SettingsDialog dialog(&m_history, this);
     connect(&dialog, &SettingsDialog::historyChanged, this, [this] {
         saveHistory();
@@ -832,6 +922,11 @@ void MainWindow::showSettings()
     });
     dialog.exec();
     m_preview->setFontSize(AppSettings::previewFontSize());
+    if (syntax != AppSettings::syntaxHighlighting() || syntaxLimit != AppSettings::syntaxLimitMB()) {
+        // Show the current file again under the new settings.
+        m_preview->showMessage(QString());
+        updatePreview();
+    }
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

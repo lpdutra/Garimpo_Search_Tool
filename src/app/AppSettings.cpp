@@ -36,6 +36,10 @@ int historyLimit() { return value("historyLimit", garimpo::History::defaultLimit
 void setHistoryLimit(int value) { store("historyLimit", value); }
 int previewFontSize() { return value("previewFontSize", 12).toInt(); }
 void setPreviewFontSize(int value) { store("previewFontSize", value); }
+bool syntaxHighlighting() { return value("syntaxHighlighting", true).toBool(); }
+void setSyntaxHighlighting(bool value) { store("syntaxHighlighting", value); }
+int syntaxLimitMB() { return qMax(1, value("syntaxLimitMB", kDefaultSyntaxLimitMB).toInt()); }
+void setSyntaxLimitMB(int value) { store("syntaxLimitMB", value); }
 
 garimpo::SearchLimits limits()
 {

@@ -75,6 +75,25 @@ QWidget *SettingsDialog::generalPage()
     connect(restore, &QCheckBox::toggled, this, [](bool on) { AppSettings::setRestoreSession(on); });
     form->addRow(QString(), restore);
 
+    auto *syntax = new QCheckBox(QStringLiteral("Highlight syntax in the preview"));
+    syntax->setChecked(AppSettings::syntaxHighlighting());
+    auto *syntaxLimit = new QSpinBox;
+    syntaxLimit->setRange(1, 4096);
+    syntaxLimit->setSuffix(QStringLiteral(" MB"));
+    syntaxLimit->setValue(AppSettings::syntaxLimitMB());
+    syntaxLimit->setEnabled(syntax->isChecked());
+    connect(syntax, &QCheckBox::toggled, this, [syntaxLimit](bool on) {
+        AppSettings::setSyntaxHighlighting(on);
+        syntaxLimit->setEnabled(on);
+    });
+    connect(syntaxLimit, &QSpinBox::valueChanged, this, [](int value) { AppSettings::setSyntaxLimitMB(value); });
+    form->addRow(QString(), syntax);
+    form->addRow(QStringLiteral("Highlight automatically up to"), syntaxLimit);
+    form->addRow(QString(), note(QStringLiteral("Bigger files show a Highlight Syntax button in the preview. "
+                                                "The default is %1 MB; Garimpo tells you when a higher limit "
+                                                "makes the preview slow.")
+                                     .arg(AppSettings::kDefaultSyntaxLimitMB)));
+
     auto *historySize = new QSpinBox;
     historySize->setRange(5, 200);
     historySize->setSingleStep(5);

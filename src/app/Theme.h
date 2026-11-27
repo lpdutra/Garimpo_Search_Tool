@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Syntax.h"
+
 #include <QColor>
 #include <QPalette>
 
@@ -16,5 +18,7 @@ QColor accentSoft(const QPalette &palette, double strength = 0.18);
 QColor matchBackground(const QPalette &palette);
 QColor currentMatchBackground();
 QColor dimText(const QPalette &palette, double alpha = 0.55);
+/// Text color for a kind of syntax token, tuned for light and dark backgrounds.
+QColor syntaxColor(const QPalette &palette, garimpo::SyntaxToken token);
 
 } // namespace Theme
